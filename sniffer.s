@@ -61,43 +61,35 @@ fmt_arrow        db ' -> ',0
 fmt_nl           db 13,10,0
 
 hostname_buf     db 256 dup(0)
-
 packet_count     dd 0
 
 section '.code' code readable executable
 
 start:
-        ; UTF-8
         invoke   SetConsoleOutputCP, 65001
 
         cinvoke  printf, fmt_s, szTitle
 
-        ; WSAStartup 2.2
         invoke   WSAStartup, 0x0202, wsa_data
         test     eax, eax
         jnz      .error_wsa
 
-        ; local IP
         invoke   gethostname, hostname_buf, 256
         test     eax, eax
         jnz      .error_host
 
-        ; resolve hostname -> hostent*
         invoke   gethostbyname, hostname_buf
         test     eax, eax
         jz       .error_resolve
 
-        ; eax -> hostent: [eax+12] = h_addr_list
         mov      eax, [eax + 12]
         mov      eax, [eax]
         mov      eax, [eax]
 
-        ; fill sockaddr_in
         mov      word [local_addr], AF_INET
         mov      word [local_addr + 2], 0
         mov      dword [local_addr + 4], eax
 
-        ; print local IP
         cinvoke  printf, fmt_s, szListening
         movzx    eax, byte [local_addr + 4]
         movzx    ebx, byte [local_addr + 5]
@@ -106,18 +98,15 @@ start:
         cinvoke  printf, fmt_ip, eax, ebx, ecx, edx
         cinvoke  printf, fmt_s, fmt_nl
 
-        ; raw socket
         invoke   socket, AF_INET, SOCK_RAW, IPPROTO_IP
         cmp      eax, INVALID_SOCKET
         je       .error_socket
         mov      [sock], eax
 
-        ; bind
         invoke   bind, [sock], local_addr, SIZEOF_SOCKADDR_IN
         cmp      eax, SOCKET_ERROR
         je       .error_bind
 
-        ; enable promiscuous receive
         invoke   WSAIoctl, [sock], SIO_RCVALL, rcvall_flag, 4, 0, 0, bytes_returned, 0, 0
         cmp      eax, SOCKET_ERROR
         je       .error_ioctl
@@ -131,20 +120,24 @@ start:
         test     eax, eax
         jz       .capture_loop
 
-        ; esi = packet size
         mov      esi, eax
 
-        ; time
+        cmp      esi, 20
+        jb       .capture_loop
+
+        mov      al, byte [recv_buf]
+        shr      al, 4
+        cmp      al, 4
+        jne      .capture_loop
+
         invoke   GetLocalTime, sys_time
-        movzx    eax,
-        word [sys_time.wHour]
+        movzx    eax, word [sys_time.wHour]
         movzx    ebx, word [sys_time.wMinute]
         movzx    ecx, word [sys_time.wSecond]
         movzx    edx, word [sys_time.wMilliseconds]
         cinvoke  printf, fmt_time, eax, ebx, ecx, edx
         cinvoke  printf, fmt_s, fmt_sep
 
-        ; protocol
         movzx    eax, byte [recv_buf + IP_PROTOCOL]
         cmp      al, 1
         je       .p_icmp
@@ -175,7 +168,6 @@ start:
 .show_addr:
         cinvoke  printf, fmt_s, fmt_sep
 
-        ; source IP
         movzx    eax, byte [recv_buf + IP_SRC_ADDR]
         movzx    ebx, byte [recv_buf + IP_SRC_ADDR + 1]
         movzx    ecx, byte [recv_buf + IP_SRC_ADDR + 2]
@@ -184,7 +176,6 @@ start:
 
         cinvoke  printf, fmt_s, fmt_arrow
 
-        ; dest IP
         movzx    eax, byte [recv_buf + IP_DST_ADDR]
         movzx    ebx, byte [recv_buf + IP_DST_ADDR + 1]
         movzx    ecx, byte [recv_buf + IP_DST_ADDR + 2]
@@ -193,7 +184,6 @@ start:
 
         cinvoke  printf, fmt_s, fmt_sep
 
-        ; size
         cinvoke  printf, fmt_size_line, esi
 
         inc      dword [packet_count]
